@@ -69,13 +69,14 @@ Data <- Data %>%
 
 ```{r Part B.2}
 Data <- Data %>% 
+  mutate(grade_level = parse_number(grade_level)) %>% 
   nest(-school, -academic_year, -district) %>% 
   slice(1:100)
 
 Plots <- Data %>% 
   separate(district, c("district", "drop"), " ") %>% 
   select(-drop) %>% 
-  mutate(plots = pmap(list(academic_year, district, school, data), ~ggplot(..4, aes(x = parse_number(grade_level), y = effect_size)) +
+  mutate(plots = pmap(list(academic_year, district, school, data), ~ggplot(..4, aes(x = grade_level, y = effect_size)) +
   coord_flip() +
   geom_col(aes(fill = effect_size)) +
   labs(title = glue("Achievement Gap Estimates: {..3}"),
