@@ -1,0 +1,106 @@
+---
+title: "Mid_term"
+author: "Xi Yang"
+date: "5/5/2019"
+output: pdf_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+library(tidyverse)
+library(rio)
+library(glue)
+library(janitor)
+library(tidyr)
+```
+
+## Part A: Data
+```{r Part A.1}
+download_file <- function(year) {
+    link <- glue::glue("https://www.oregon.gov/ode/educator-resources/assessment/TestResults20{year}/pagr_schools_ela_raceethnicity_{year-1}{year}.xlsx")
+    rio::import(link, setclass = "tibble", na = c("-", "--", "*"))
+}
+Data15 <- download_file(15)
+Data16 <- download_file(16)
+Data17 <- download_file(17)
+Data18 <- download_file(18)
+Data <- as_tibble(bind_rows(list(Data15, Data16, Data17, Data18))) %>% 
+  clean_names() %>% 
+  filter(student_group %in% c("White", "Hispanic/Latino")) %>% 
+  select(academic_year, district, school, student_group, grade_level,
+         starts_with("number_level")) %>% 
+  gather("level", "n", -(1:5)) %>% 
+  filter(!is.na(n)) %>% 
+  mutate(level = parse_number(level))
+```
+
+```{r Part A.2}
+Data <- Data %>% 
+  group_by(academic_year, school, student_group, grade_level) %>%
+  arrange(academic_year, school, student_group, grade_level, level) %>% 
+  mutate(cn = cumsum(n))
+```
+
+```{r Part A.3}
+Data <- Data %>% 
+  select(-n) %>% 
+  spread(student_group, cn) %>% 
+  clean_names() %>% 
+  filter(!is.na(hispanic_latino),
+         !is.na(white))
+```
+
+## Part B: Achievement gaps
+```{r Part B.1}
+library(pracma)
+gap <- function(data, ref, foc) {
+    x <- data[[ref]]
+    y <- data[[foc]]
+    auc <- pracma::trapz(y / y[length(x)],
+                         x / x[length(x)])
+    sqrt(2)*qnorm(auc)
+}
+
+gap(Data[1:4, ], "white", "hispanic_latino")
+Data <- Data %>% 
+  group_by(academic_year, district, school, grade_level) %>% 
+  summarise(effect_size = gap(.data, "white", "hispanic_latino"))
+```
+
+```{r Part B.2}
+Data <- Data %>% 
+  nest(-school, -academic_year, -district) %>% 
+  slice(1:100)
+
+Plots <- Data %>% 
+  separate(district, c("district", "drop"), " ") %>% 
+  select(-drop) %>% 
+  mutate(plots = pmap(list(academic_year, district, school, data), ~ggplot(..4, aes(x = parse_number(grade_level), y = effect_size)) +
+  coord_flip() +
+  geom_col(aes(fill = effect_size)) +
+  labs(title = glue("Achievement Gap Estimates: {..3}"),
+       subtitle = "Students coded as White as compared to those coded as Hispanic/Latino",
+       caption = glue("{..1} School year, {..2} School District, Oregon"),
+       x = "Grade",
+       y = "Effect Size",
+       fill = NULL) +
+  scale_fill_gradient2(low = "turquoise4", high = "darkorange4", 
+                       guide = guide_colourbar(direction = "horizontal",
+                                               barwidth = 22)) +
+  theme_minimal() +
+  theme(legend.position = "bottom") +
+  geom_hline(yintercept = 0, color = "turquoise2")))
+```
+
+```{r Part B.3}
+here::here()
+fs::dir_create(here::here("plots"))
+files <- paste(Plots$academic_year, Plots$school)
+paths <- here::here("plots", glue("{files}.png"))
+paths
+walk2(paths, Plots$plots, ggsave,
+      width = 9.5, 
+      height = 6.5,
+      dpi = 500)
+```
+
